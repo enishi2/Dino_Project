@@ -164,12 +164,29 @@ def inject_app_styles() -> None:
         [data-testid="stChatMessageAvatarUser"],
         [data-testid="stChatMessageAvatarAssistant"] {
             background: transparent !important;
+            border-radius: 999px !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+        }
+        [data-testid="stChatMessageAvatarUser"] > div,
+        [data-testid="stChatMessageAvatarAssistant"] > div {
+            background: transparent !important;
+            border-radius: 999px !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+            box-shadow: none !important;
         }
         [data-testid="stChatMessageAvatarUser"] img,
         [data-testid="stChatMessageAvatarAssistant"] img {
             border-radius: 50% !important;
             background: transparent !important;
             box-shadow: none !important;
+            display: block !important;
+            overflow: hidden !important;
+        }
+        [data-testid="stChatMessageContent"] {
+            background: transparent;
         }
         </style>
         """,
