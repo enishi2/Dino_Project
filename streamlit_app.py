@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import random
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -307,6 +308,37 @@ def load_local_data() -> tuple[dict[str, str], list, list]:
     return load_meta(DB_PATH), load_messages(DB_PATH), load_blocks(DB_PATH)
 
 
+def guess_candidates(messages: list) -> list:
+    return [
+        message
+        for message in messages
+        if message.sender != "Sistema" and len(message.text.strip()) >= 28 and "\n" not in message.text[:220]
+    ]
+
+
+def ensure_guess_round(messages: list) -> None:
+    candidates = guess_candidates(messages)
+    if not candidates:
+        return
+    if st.session_state.get("guess_round_answered"):
+        return
+    if st.session_state.get("guess_round_text"):
+        return
+    pick = random.choice(candidates)
+    st.session_state["guess_round_text"] = pick.text
+    st.session_state["guess_round_sender"] = pick.sender
+    st.session_state["guess_round_date"] = pick.timestamp.strftime("%B %d, %Y") if pick.timestamp else "Unknown date"
+
+
+def start_new_guess_round(messages: list) -> None:
+    st.session_state["guess_round_text"] = None
+    st.session_state["guess_round_sender"] = None
+    st.session_state["guess_round_date"] = None
+    st.session_state["guess_round_answered"] = False
+    st.session_state["guess_feedback"] = ""
+    ensure_guess_round(messages)
+
+
 cloud_mode = supabase_store.supabase_configured()
 
 if cloud_mode and ("user" not in st.session_state or "session" not in st.session_state):
@@ -396,36 +428,89 @@ if not blocks:
 left, right = st.columns([0.68, 0.32], gap="large")
 
 with left:
-    st.subheader("Bot")
-    if "chat" not in st.session_state:
-        st.session_state["chat"] = []
+    tab_chat, tab_guess = st.tabs(["Chat", "Guess Who Said It"])
 
-    examples = [
-        "How did the friendship start?",
-        "What signs show interest or connection between them?",
-        "What did she say about art, AI, and Portugal?",
-        "Are there any relationship concerns or points to be careful about?",
-    ]
-    selected_example = st.selectbox("Quick questions", [""] + examples)
-    question = st.chat_input("Ask something about the conversation")
-    if selected_example and st.button("Ask example"):
-        question = selected_example
+    with tab_chat:
+        st.subheader("Bot")
+        if "chat" not in st.session_state:
+            st.session_state["chat"] = []
 
-    for item in st.session_state["chat"]:
-        with st.chat_message(item["role"], avatar=chat_avatar(item["role"])):
-            st.markdown(item["content"])
+        examples = [
+            "How did the friendship start?",
+            "What signs show interest or connection between them?",
+            "What did she say about art, AI, and Portugal?",
+            "Are there any relationship concerns or points to be careful about?",
+        ]
+        selected_example = st.selectbox("Quick questions", [""] + examples)
+        question = st.chat_input("Ask something about the conversation")
+        if selected_example and st.button("Ask example"):
+            question = selected_example
 
-    if question:
-        with st.chat_message("user", avatar=chat_avatar("user")):
-            st.markdown(question)
-        results = search_blocks(question, blocks, top_k=top_k)
-        with st.spinner("Reading the most relevant excerpts and preparing an answer..."):
-            selected_model = gemini_model if provider == "Gemini" else groq_model
-            answer = ask_ai(question, results, provider=provider, model=selected_model, temperature=temperature)
-        st.session_state["chat"].append({"role": "user", "content": question})
-        st.session_state["chat"].append({"role": "assistant", "content": answer})
-        with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-            st.markdown(answer)
+        for item in st.session_state["chat"]:
+            with st.chat_message(item["role"], avatar=chat_avatar(item["role"])):
+                st.markdown(item["content"])
+
+        if question:
+            with st.chat_message("user", avatar=chat_avatar("user")):
+                st.markdown(question)
+            results = search_blocks(question, blocks, top_k=top_k)
+            with st.spinner("Reading the most relevant excerpts and preparing an answer..."):
+                selected_model = gemini_model if provider == "Gemini" else groq_model
+                answer = ask_ai(question, results, provider=provider, model=selected_model, temperature=temperature)
+            st.session_state["chat"].append({"role": "user", "content": question})
+            st.session_state["chat"].append({"role": "assistant", "content": answer})
+            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
+                st.markdown(answer)
+
+    with tab_guess:
+        st.subheader("Guess Who Said It")
+        players = sorted({message.sender for message in messages if message.sender != "Sistema"})
+        if len(players) < 2:
+            st.info("This game needs at least two participants in the conversation.")
+        else:
+            if "guess_score" not in st.session_state:
+                st.session_state["guess_score"] = 0
+                st.session_state["guess_total"] = 0
+                st.session_state["guess_round_answered"] = False
+                st.session_state["guess_feedback"] = ""
+            ensure_guess_round(messages)
+
+            score_col, action_col = st.columns([0.45, 0.55])
+            with score_col:
+                st.metric("Score", f"{st.session_state['guess_score']} / {st.session_state['guess_total']}")
+            with action_col:
+                if st.button("New quote", key="new_guess_round"):
+                    start_new_guess_round(messages)
+                    st.rerun()
+
+            if st.session_state.get("guess_round_text"):
+                st.caption(f"Conversation date: {st.session_state['guess_round_date']}")
+                st.markdown(
+                    f"""
+                    <div style="padding: 1rem 1.1rem; border-radius: 10px; background: rgba(18,17,13,0.52); border: 1px solid rgba(250,198,62,0.14);">
+                        <div style="font-size: 1.06rem; line-height: 1.6;">{st.session_state['guess_round_text']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                button_cols = st.columns(len(players))
+                for idx, player in enumerate(players):
+                    with button_cols[idx]:
+                        if st.button(player, key=f"guess_{idx}", use_container_width=True):
+                            if not st.session_state.get("guess_round_answered"):
+                                st.session_state["guess_total"] += 1
+                                st.session_state["guess_round_answered"] = True
+                                if player == st.session_state["guess_round_sender"]:
+                                    st.session_state["guess_score"] += 1
+                                    st.session_state["guess_feedback"] = f"Correct. It was {player}."
+                                else:
+                                    st.session_state["guess_feedback"] = (
+                                        f"Not quite. The correct answer was {st.session_state['guess_round_sender']}."
+                                    )
+                            st.rerun()
+
+                if st.session_state.get("guess_feedback"):
+                    st.info(st.session_state["guess_feedback"])
 
 with right:
     st.subheader("Knowledge Base Summary")
