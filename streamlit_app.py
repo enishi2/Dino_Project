@@ -20,7 +20,6 @@ from whatsapp_memory_core import (
     read_whatsapp_export,
     rebuild_database,
     search_blocks,
-    timeline_by_day,
 )
 
 
@@ -376,7 +375,7 @@ if cloud_mode and ("user" not in st.session_state or "session" not in st.session
 inject_app_styles()
 
 st.title("Dino Memo")
-st.caption("A chat bot with semantic search, smart conversation excerpts, and a timeline.")
+st.caption("A chat bot with semantic search and smart conversation excerpts.")
 
 with st.sidebar:
     with st.popover("Settings", use_container_width=True):
@@ -522,9 +521,7 @@ with left:
                     st.rerun()
 
             if st.session_state.get("guess_round_text"):
-                st.caption(
-                    f"Selected from {st.session_state.get('guess_round_period', 'the conversation timeline')}."
-                )
+                st.caption("Random quote from the indexed conversation.")
                 st.markdown(
                     f"""
                     <div style="padding: 1rem 1.1rem; border-radius: 10px; background: rgba(18,17,13,0.52); border: 1px solid rgba(250,198,62,0.14);">
@@ -570,18 +567,6 @@ with right:
     st.metric("Messages", meta.get("message_count", "0"))
     st.metric("Excerpts", meta.get("block_count", "0"))
     st.caption(f"Source: {meta.get('source_name', 'no source')}")
-
-    st.subheader("Timeline")
-    timeline = timeline_by_day(messages)
-    if timeline:
-        labels = [f"{day['date']} - {day['messages']} messages" for day in timeline]
-        selected_label = st.selectbox("Choose a day", labels)
-        selected_day = timeline[labels.index(selected_label)]
-        st.write("Participants:", selected_day["senders"])
-        st.write("Topics:", selected_day["topics"] or "no topics detected")
-        st.caption(str(selected_day["first"]))
-    else:
-        st.caption("No timeline available.")
 
     st.subheader("Direct Search")
     query = st.text_input("Search by meaning or topic")

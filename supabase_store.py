@@ -10,6 +10,33 @@ from supabase import Client, create_client
 from whatsapp_memory_core import Block, Message
 
 
+def fetch_all_rows(
+    client: Client,
+    table: str,
+    columns: str,
+    filters: dict[str, Any] | None = None,
+    order_by: str | None = None,
+    page_size: int = 1000,
+) -> list[dict[str, Any]]:
+    filters = filters or {}
+    start = 0
+    rows: list[dict[str, Any]] = []
+
+    while True:
+        query = client.table(table).select(columns)
+        for key, value in filters.items():
+            query = query.eq(key, value)
+        if order_by:
+            query = query.order(order_by)
+        batch = query.range(start, start + page_size - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+
+    return rows
+
+
 def supabase_configured() -> bool:
     return bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_ANON_KEY"))
 
@@ -135,23 +162,19 @@ def list_conversations(client: Client, user_id: str) -> list[dict[str, Any]]:
 
 def load_conversation(client: Client, conversation_id: str) -> tuple[dict[str, str], list[Message], list[Block]]:
     conversation = client.table("conversations").select("*").eq("id", conversation_id).single().execute().data
-    message_rows = (
-        client.table("messages")
-        .select("timestamp, sender, text, raw")
-        .eq("conversation_id", conversation_id)
-        .order("position")
-        .execute()
-        .data
-        or []
+    message_rows = fetch_all_rows(
+        client,
+        "messages",
+        "timestamp, sender, text, raw",
+        filters={"conversation_id": conversation_id},
+        order_by="position",
     )
-    block_rows = (
-        client.table("blocks")
-        .select("position, start_at, end_at, senders, title, text, message_count")
-        .eq("conversation_id", conversation_id)
-        .order("position")
-        .execute()
-        .data
-        or []
+    block_rows = fetch_all_rows(
+        client,
+        "blocks",
+        "position, start_at, end_at, senders, title, text, message_count",
+        filters={"conversation_id": conversation_id},
+        order_by="position",
     )
     messages = [
         Message(
