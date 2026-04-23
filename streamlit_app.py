@@ -184,9 +184,9 @@ def image_data_uri(path: Path) -> str:
 
 def chat_avatar(role: str) -> str | None:
     if role == "user" and USER_CHAT_ICON_PATH.exists():
-        return image_data_uri(USER_CHAT_ICON_PATH)
+        return str(USER_CHAT_ICON_PATH.resolve())
     if role in {"assistant", "bot"} and BOT_CHAT_ICON_PATH.exists():
-        return image_data_uri(BOT_CHAT_ICON_PATH)
+        return str(BOT_CHAT_ICON_PATH.resolve())
     return None
 
 
