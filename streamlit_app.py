@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import random
+from collections import defaultdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -316,26 +317,53 @@ def guess_candidates(messages: list) -> list:
     ]
 
 
-def ensure_guess_round(messages: list) -> None:
+def guess_period_key(message) -> str:
+    if not message.timestamp:
+        return "Unknown period"
+    return message.timestamp.strftime("%Y-%m")
+
+
+def pick_guess_candidate(messages: list):
     candidates = guess_candidates(messages)
     if not candidates:
-        return
+        return None
+
+    current_text = st.session_state.get("guess_round_text")
+    recent_texts = st.session_state.get("guess_recent_texts", [])
+    usable = [message for message in candidates if message.text != current_text and message.text not in recent_texts]
+    if not usable:
+        usable = [message for message in candidates if message.text != current_text] or candidates
+
+    by_period: dict[str, list] = defaultdict(list)
+    for message in usable:
+        by_period[guess_period_key(message)].append(message)
+
+    chosen_period = random.choice(list(by_period))
+    return random.choice(by_period[chosen_period])
+
+
+def ensure_guess_round(messages: list) -> None:
     if st.session_state.get("guess_round_answered"):
         return
     if st.session_state.get("guess_round_text"):
         return
-    pick = random.choice(candidates)
+    pick = pick_guess_candidate(messages)
+    if not pick:
+        return
     st.session_state["guess_round_text"] = pick.text
     st.session_state["guess_round_sender"] = pick.sender
     st.session_state["guess_round_date"] = pick.timestamp.strftime("%B %d, %Y") if pick.timestamp else "Unknown date"
+    st.session_state["guess_round_period"] = guess_period_key(pick)
 
 
 def start_new_guess_round(messages: list) -> None:
     st.session_state["guess_round_text"] = None
     st.session_state["guess_round_sender"] = None
     st.session_state["guess_round_date"] = None
+    st.session_state["guess_round_period"] = None
     st.session_state["guess_round_answered"] = False
     st.session_state["guess_feedback"] = ""
+    st.session_state["guess_feedback_kind"] = None
     ensure_guess_round(messages)
 
 
@@ -473,18 +501,30 @@ with left:
                 st.session_state["guess_total"] = 0
                 st.session_state["guess_round_answered"] = False
                 st.session_state["guess_feedback"] = ""
+                st.session_state["guess_feedback_kind"] = None
+                st.session_state["guess_recent_texts"] = []
             ensure_guess_round(messages)
 
-            score_col, action_col = st.columns([0.45, 0.55])
-            with score_col:
-                st.metric("Score", f"{st.session_state['guess_score']} / {st.session_state['guess_total']}")
+            rounds_played = st.session_state["guess_total"]
+            correct_answers = st.session_state["guess_score"]
+            accuracy = round((correct_answers / rounds_played) * 100) if rounds_played else 0
+
+            metric_col1, metric_col2, metric_col3, action_col = st.columns([0.22, 0.22, 0.22, 0.34])
+            with metric_col1:
+                st.metric("Correct", str(correct_answers))
+            with metric_col2:
+                st.metric("Rounds", str(rounds_played))
+            with metric_col3:
+                st.metric("Accuracy", f"{accuracy}%")
             with action_col:
-                if st.button("New quote", key="new_guess_round"):
+                if st.button("Next quote", key="new_guess_round", use_container_width=True):
                     start_new_guess_round(messages)
                     st.rerun()
 
             if st.session_state.get("guess_round_text"):
-                st.caption(f"Conversation date: {st.session_state['guess_round_date']}")
+                st.caption(
+                    f"Selected from {st.session_state.get('guess_round_period', 'the conversation timeline')}."
+                )
                 st.markdown(
                     f"""
                     <div style="padding: 1rem 1.1rem; border-radius: 10px; background: rgba(18,17,13,0.52); border: 1px solid rgba(250,198,62,0.14);">
@@ -500,17 +540,30 @@ with left:
                             if not st.session_state.get("guess_round_answered"):
                                 st.session_state["guess_total"] += 1
                                 st.session_state["guess_round_answered"] = True
+                                recent = st.session_state.get("guess_recent_texts", [])
+                                st.session_state["guess_recent_texts"] = (
+                                    [st.session_state["guess_round_text"], *recent][:12]
+                                )
                                 if player == st.session_state["guess_round_sender"]:
                                     st.session_state["guess_score"] += 1
                                     st.session_state["guess_feedback"] = f"Correct. It was {player}."
+                                    st.session_state["guess_feedback_kind"] = "success"
                                 else:
                                     st.session_state["guess_feedback"] = (
                                         f"Not quite. The correct answer was {st.session_state['guess_round_sender']}."
                                     )
+                                    st.session_state["guess_feedback_kind"] = "error"
                             st.rerun()
 
                 if st.session_state.get("guess_feedback"):
-                    st.info(st.session_state["guess_feedback"])
+                    if st.session_state.get("guess_feedback_kind") == "success":
+                        st.success(
+                            f"{st.session_state['guess_feedback']} Conversation date: {st.session_state['guess_round_date']}."
+                        )
+                    else:
+                        st.error(
+                            f"{st.session_state['guess_feedback']} Conversation date: {st.session_state['guess_round_date']}."
+                        )
 
 with right:
     st.subheader("Knowledge Base Summary")
