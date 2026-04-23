@@ -26,6 +26,8 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("LOCALAPPDATA", APP_DIR)) / "WhatsAppMemoryBot"
 DB_PATH = DATA_DIR / "whatsapp_memory_app.sqlite3"
 LOGO_PATH = APP_DIR / "assets" / "dino-memo-logo.png"
+USER_CHAT_ICON_PATH = APP_DIR / "assets" / "dino-chat-icon.png"
+BOT_CHAT_ICON_PATH = APP_DIR / "assets" / "bot-chat-icon.png"
 
 
 st.set_page_config(page_title="Dino Memo", page_icon="Chat", layout="wide")
@@ -158,6 +160,16 @@ def inject_app_styles() -> None:
             background: rgba(18, 17, 13, 0.46);
             border-color: rgba(250, 198, 62, 0.14);
         }
+        [data-testid="stChatMessageAvatarUser"],
+        [data-testid="stChatMessageAvatarAssistant"] {
+            background: transparent !important;
+        }
+        [data-testid="stChatMessageAvatarUser"] img,
+        [data-testid="stChatMessageAvatarAssistant"] img {
+            border-radius: 50% !important;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -167,6 +179,14 @@ def inject_app_styles() -> None:
 def image_data_uri(path: Path) -> str:
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+
+def chat_avatar(role: str) -> str | None:
+    if role == "user" and USER_CHAT_ICON_PATH.exists():
+        return image_data_uri(USER_CHAT_ICON_PATH)
+    if role in {"assistant", "bot"} and BOT_CHAT_ICON_PATH.exists():
+        return image_data_uri(BOT_CHAT_ICON_PATH)
+    return None
 
 
 def local_import_conversation(path: Path) -> None:
@@ -392,11 +412,11 @@ with left:
         question = selected_example
 
     for item in st.session_state["chat"]:
-        with st.chat_message(item["role"]):
+        with st.chat_message(item["role"], avatar=chat_avatar(item["role"])):
             st.markdown(item["content"])
 
     if question:
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar=chat_avatar("user")):
             st.markdown(question)
         results = search_blocks(question, blocks, top_k=top_k)
         with st.spinner("Reading the most relevant excerpts and preparing an answer..."):
@@ -404,7 +424,7 @@ with left:
             answer = ask_ai(question, results, provider=provider, model=selected_model, temperature=temperature)
         st.session_state["chat"].append({"role": "user", "content": question})
         st.session_state["chat"].append({"role": "assistant", "content": answer})
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar=chat_avatar("assistant")):
             st.markdown(answer)
 
 with right:
