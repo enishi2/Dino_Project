@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import os
 import random
 from collections import defaultdict
@@ -106,6 +107,15 @@ def inject_auth_styles() -> None:
             height: 2.35rem;
             padding: 0 0.75rem;
         }
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #7fc4ff !important;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #7fc4ff !important;
+        }
+        .stTabs [data-baseweb="tab-highlight"] {
+            background-color: #7fc4ff !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -188,6 +198,40 @@ def inject_app_styles() -> None:
         [data-testid="stChatMessageContent"] {
             background: transparent;
         }
+        .dm-chat-row {
+            display: flex;
+            gap: 0.7rem;
+            align-items: flex-start;
+            margin: 0.85rem 0;
+        }
+        .dm-chat-avatar {
+            width: 2.4rem;
+            height: 2.4rem;
+            border-radius: 50%;
+            object-fit: cover;
+            flex: 0 0 2.4rem;
+            display: block;
+            box-shadow: none;
+            background: transparent;
+        }
+        .dm-chat-bubble {
+            flex: 1;
+            padding: 0.9rem 1rem;
+            border-radius: 10px;
+            background: rgba(18, 17, 13, 0.58);
+            border: 1px solid rgba(250, 198, 62, 0.14);
+            color: rgba(255, 248, 232, 0.96);
+            line-height: 1.6;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #8ac8ff !important;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #8ac8ff !important;
+        }
+        .stTabs [data-baseweb="tab-highlight"] {
+            background-color: #8ac8ff !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -201,10 +245,27 @@ def image_data_uri(path: Path) -> str:
 
 def chat_avatar(role: str) -> str | None:
     if role == "user" and USER_CHAT_ICON_PATH.exists():
-        return str(USER_CHAT_ICON_PATH.resolve())
+        return image_data_uri(USER_CHAT_ICON_PATH)
     if role in {"assistant", "bot"} and BOT_CHAT_ICON_PATH.exists():
-        return str(BOT_CHAT_ICON_PATH.resolve())
+        return image_data_uri(BOT_CHAT_ICON_PATH)
     return None
+
+
+def render_chat_message(role: str, content: str) -> None:
+    avatar = chat_avatar(role)
+    avatar_html = ""
+    if avatar:
+        avatar_html = f'<img class="dm-chat-avatar" src="{avatar}" alt="{role} avatar" />'
+    safe_content = html.escape(content).replace("\n", "<br>")
+    st.markdown(
+        f"""
+        <div class="dm-chat-row">
+            {avatar_html}
+            <div class="dm-chat-bubble">{safe_content}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def local_import_conversation(path: Path) -> None:
@@ -491,20 +552,17 @@ with left:
             question = selected_example
 
         for item in st.session_state["chat"]:
-            with st.chat_message(item["role"], avatar=chat_avatar(item["role"])):
-                st.markdown(item["content"])
+            render_chat_message(item["role"], item["content"])
 
         if question:
-            with st.chat_message("user", avatar=chat_avatar("user")):
-                st.markdown(question)
+            render_chat_message("user", question)
             results = search_blocks(question, blocks, top_k=top_k)
             with st.spinner("Reading the most relevant excerpts and preparing an answer..."):
                 selected_model = gemini_model if provider == "Gemini" else groq_model
                 answer = ask_ai(question, results, provider=provider, model=selected_model, temperature=temperature)
             st.session_state["chat"].append({"role": "user", "content": question})
             st.session_state["chat"].append({"role": "assistant", "content": answer})
-            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                st.markdown(answer)
+            render_chat_message("assistant", answer)
 
     with tab_guess:
         st.subheader("Guess Who Said It")
