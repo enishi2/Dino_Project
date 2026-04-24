@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import os
 import random
+import re
 from collections import defaultdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import supabase_store
 from whatsapp_memory_core import (
@@ -444,6 +447,241 @@ def start_new_guess_round(messages: list) -> None:
     ensure_guess_round(messages)
 
 
+def normalize_guess_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def guess_quote_difficulty(text: str, players: list[str]) -> int:
+    cleaned = normalize_guess_text(text)
+    lowered = cleaned.lower()
+    difficulty = 0
+    if 55 <= len(cleaned) <= 180:
+        difficulty += 2
+    elif 35 <= len(cleaned) <= 220:
+        difficulty += 1
+    if cleaned.count("!") <= 1 and cleaned.count("?") <= 1:
+        difficulty += 1
+    if not re.search(r"\b(?:haha|kkkk|lol|lmao|omg)\b", lowered):
+        difficulty += 1
+    if not any(player.lower().split()[0] in lowered for player in players):
+        difficulty += 1
+    if re.search(r"\b(?:maybe|perhaps|acho|talvez|wonder|feel|seems|kind of)\b", lowered):
+        difficulty += 1
+    return difficulty
+
+
+def multiplayer_quote_candidates(messages: list, limit: int = 140) -> list[dict[str, str | int]]:
+    players = sorted({message.sender for message in messages if message.sender != "Sistema"})
+    seen: set[str] = set()
+    candidates: list[dict[str, str | int]] = []
+    for index, message in enumerate(messages):
+        if message.sender == "Sistema" or not message.timestamp:
+            continue
+        text = normalize_guess_text(message.text)
+        if len(text) < 35 or len(text) > 220:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        difficulty = guess_quote_difficulty(text, players)
+        if difficulty < 3:
+            continue
+        candidates.append(
+            {
+                "id": f"q-{index}",
+                "sender": message.sender,
+                "text": text,
+                "date": message.timestamp.strftime("%Y-%m-%d"),
+                "difficulty": difficulty,
+            }
+        )
+    candidates.sort(key=lambda item: (item["difficulty"], len(str(item["text"]))), reverse=True)
+    return candidates[:limit]
+
+
+def render_multiplayer_guess(messages: list, user_label: str) -> None:
+    host = os.getenv("PARTYKIT_HOST", "").strip()
+    quotes = multiplayer_quote_candidates(messages)
+    if not host:
+        st.info("Set `PARTYKIT_HOST` to enable realtime multiplayer rooms.")
+        return
+    if len(quotes) < 12:
+        st.info("The current conversation does not have enough solid quotes for multiplayer yet.")
+        return
+
+    payload = json.dumps(
+        {
+            "host": host,
+            "quotes": quotes,
+            "players": sorted({message.sender for message in messages if message.sender != "Sistema"}),
+            "userLabel": user_label or "Player",
+        }
+    )
+    components.html(
+        f"""
+        <div id="dm-multi-root"></div>
+        <script>
+        const config = {payload};
+        const root = document.getElementById("dm-multi-root");
+        root.innerHTML = `
+          <style>
+            :root {{
+              color-scheme: dark;
+              font-family: Inter, system-ui, sans-serif;
+            }}
+            .dm-wrap {{ color: #fff4df; }}
+            .dm-row {{ display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.9rem; }}
+            .dm-input, .dm-button {{
+              border-radius: 10px; border: 1px solid rgba(138, 200, 255, 0.18);
+              background: rgba(17, 16, 12, 0.72); color: #fff4df; padding: 0.8rem 0.95rem;
+            }}
+            .dm-input {{ min-width: 10rem; flex: 1; }}
+            .dm-button {{ cursor: pointer; font-weight: 600; }}
+            .dm-button.primary {{ background: rgba(138, 200, 255, 0.18); }}
+            .dm-panel {{
+              background: rgba(17, 16, 12, 0.72); border: 1px solid rgba(250, 198, 62, 0.14);
+              border-radius: 12px; padding: 1rem; margin-top: 0.8rem;
+            }}
+            .dm-muted {{ color: rgba(255, 244, 210, 0.72); font-size: 0.92rem; }}
+            .dm-quote {{ font-size: 1.06rem; line-height: 1.7; }}
+            .dm-answers {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.7rem; margin-top: 1rem; }}
+            .dm-score {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.7rem; margin-top: 1rem; }}
+            .dm-chip {{ border-radius: 999px; padding: 0.35rem 0.75rem; background: rgba(138, 200, 255, 0.12); display: inline-block; }}
+            .dm-list {{ margin: 0.5rem 0 0; padding-left: 1rem; }}
+            .dm-banner {{ margin-top: 0.85rem; padding: 0.8rem 0.95rem; border-radius: 10px; }}
+            .dm-success {{ background: rgba(59, 130, 90, 0.18); color: #b8f7ce; }}
+            .dm-error {{ background: rgba(180, 54, 54, 0.18); color: #ffc7c7; }}
+          </style>
+          <div class="dm-wrap">
+            <div class="dm-row">
+              <input id="room" class="dm-input" placeholder="Room code" value="" />
+              <input id="name" class="dm-input" placeholder="Display name" value="${{config.userLabel}}" />
+              <button id="join" class="dm-button primary">Join room</button>
+              <button id="next" class="dm-button">Next round</button>
+            </div>
+            <div class="dm-muted">Realtime room powered by PartyKit. Quotes are prefiltered to lean naturally harder.</div>
+            <div id="status" class="dm-panel">Join a room to start.</div>
+            <div id="game" class="dm-panel" style="display:none;"></div>
+          </div>
+        `;
+
+        const roomInput = root.querySelector("#room");
+        const nameInput = root.querySelector("#name");
+        const joinButton = root.querySelector("#join");
+        const nextButton = root.querySelector("#next");
+        const statusEl = root.querySelector("#status");
+        const gameEl = root.querySelector("#game");
+
+        let socket = null;
+        let connectionId = null;
+        let latestState = null;
+        let seededRoom = null;
+
+        function setStatus(text) {{
+          statusEl.textContent = text;
+        }}
+
+        function send(type, payload = {{}}) {{
+          if (!socket || socket.readyState !== WebSocket.OPEN) return;
+          socket.send(JSON.stringify({{ type, ...payload }}));
+        }}
+
+        function renderState(state) {{
+          latestState = state;
+          const players = Object.values(state.players || {{}}).sort((a, b) => b.score - a.score);
+          const round = state.currentRound;
+          const scoreboard = players.map((player) => `
+            <div class="dm-panel">
+              <div><strong>${{player.name}}</strong></div>
+              <div class="dm-muted">${{player.score}} points</div>
+            </div>
+          `).join("");
+
+          if (!round) {{
+            gameEl.style.display = "block";
+            gameEl.innerHTML = `
+              <div class="dm-chip">Players online: ${{players.length}}</div>
+              <div class="dm-score">${{scoreboard || '<div class="dm-muted">No players yet.</div>'}}</div>
+              <div class="dm-muted" style="margin-top: 1rem;">Press "Next round" when everyone is ready.</div>
+            `;
+            return;
+          }}
+
+          const alreadyGuessed = connectionId && round.guesses && round.guesses[connectionId];
+          const answers = (round.options || []).map((option) => `
+            <button class="dm-button answer" data-answer="${{option}}" ${{alreadyGuessed ? "disabled" : ""}}>${{option}}</button>
+          `).join("");
+
+          const banner = round.reveal
+            ? `<div class="dm-banner ${{round.lastCorrect === connectionId ? "dm-success" : "dm-error"}}">
+                Correct answer: <strong>${{round.correctSender}}</strong><br>
+                Date: ${{round.dateLabel}}
+              </div>`
+            : "";
+
+          gameEl.style.display = "block";
+          gameEl.innerHTML = `
+            <div class="dm-chip">Difficulty: hard</div>
+            <div class="dm-muted" style="margin-top: 0.75rem;">Room: <strong>${{state.roomId}}</strong></div>
+            <div class="dm-panel" style="margin-top: 0.9rem;">
+              <div class="dm-quote">${{round.text}}</div>
+              <div class="dm-answers">${{answers}}</div>
+              ${{banner}}
+            </div>
+            <div class="dm-score">${{scoreboard}}</div>
+          `;
+
+          gameEl.querySelectorAll(".answer").forEach((button) => {{
+            button.addEventListener("click", () => send("submit_guess", {{ answer: button.dataset.answer }}));
+          }});
+        }}
+
+        function connect() {{
+          const room = roomInput.value.trim().toLowerCase();
+          const displayName = nameInput.value.trim() || "Player";
+          if (!room) {{
+            setStatus("Choose a room code first.");
+            return;
+          }}
+          if (socket) socket.close();
+          const protocol = config.host.includes("localhost") ? "ws" : "wss";
+          socket = new WebSocket(`${{protocol}}://${{config.host}}/party/${{room}}`);
+
+          socket.addEventListener("open", () => {{
+            setStatus(`Connected to room ${{room}}.`);
+            send("join", {{ displayName }});
+            if (seededRoom !== room) {{
+              send("seed_quotes", {{ quotes: config.quotes, options: config.players }});
+              seededRoom = room;
+            }}
+          }});
+
+          socket.addEventListener("message", (event) => {{
+            const payload = JSON.parse(event.data);
+            if (payload.type === "session") {{
+              connectionId = payload.connectionId;
+            }}
+            if (payload.type === "state") {{
+              renderState(payload.state);
+            }}
+            if (payload.type === "notice") {{
+              setStatus(payload.message);
+            }}
+          }});
+
+          socket.addEventListener("close", () => {{
+            setStatus("Disconnected from the room.");
+          }});
+        }}
+
+        joinButton.addEventListener("click", connect);
+        nextButton.addEventListener("click", () => send("next_round"));
+        </script>
+        """,
+        height=760,
+    )
+
+
 cloud_mode = supabase_store.supabase_configured()
 
 if cloud_mode and ("user" not in st.session_state or "session" not in st.session_state):
@@ -533,7 +771,7 @@ if not blocks:
 left, right = st.columns([0.68, 0.32], gap="large")
 
 with left:
-    tab_chat, tab_guess = st.tabs(["Chat", "Guess Who Said It"])
+    tab_chat, tab_guess, tab_multiplayer = st.tabs(["Chat", "Guess Who Said It", "Multiplayer"])
 
     with tab_chat:
         st.subheader("Bot")
@@ -636,6 +874,14 @@ with left:
                         st.error(
                             f"{st.session_state['guess_feedback']} Conversation date: {st.session_state['guess_round_date']}."
                         )
+
+    with tab_multiplayer:
+        st.subheader("Guess Who Said It Multiplayer")
+        st.caption("Create a room, join from multiple browsers, and play live rounds with harder quotes.")
+        user_label = ""
+        if cloud_mode and "user" in st.session_state:
+            user_label = st.session_state["user"].email.split("@", 1)[0]
+        render_multiplayer_guess(messages, user_label)
 
 with right:
     st.subheader("Knowledge Base Summary")

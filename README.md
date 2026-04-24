@@ -9,6 +9,7 @@ Dino Memo is a web app for exploring WhatsApp conversations with AI-powered chat
 - AI chat over WhatsApp exports
 - Timeline and semantic search
 - Guess Who Said It mini-game
+- Realtime Guess Who Said It multiplayer rooms with PartyKit
 - Supabase email/password login
 - Groq with Gemini fallback
 
@@ -27,6 +28,7 @@ $env:GROQ_API_KEY="your_groq_key"
 $env:GEMINI_API_KEY="your_gemini_key"
 $env:SUPABASE_URL="https://your-project.supabase.co"
 $env:SUPABASE_ANON_KEY="your_supabase_anon_key"
+$env:PARTYKIT_HOST="your-project.yourname.partykit.dev"
 ```
 
 Start the app:
@@ -65,3 +67,4 @@ SUPABASE_ANON_KEY = "your_supabase_anon_key"
 - Keep API keys server-side only
 - Do not use the Supabase `service_role` key in the app
 - AI relationship analysis should be treated as a hypothesis, not certainty
+- Multiplayer PartyKit setup: `PARTYKIT_MULTIPLAYER.md`

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "dino-memo-multiplayer",
+  "main": "src/server.ts",
+  "compatibilityDate": "2025-03-01"
+}
