@@ -7,7 +7,10 @@ create table if not exists public.conversations (
     message_count integer not null default 0,
     block_count integer not null default 0,
     indexed_at timestamptz not null default now(),
-    created_at timestamptz not null default now()
+    created_at timestamptz not null default now(),
+    constraint conversations_message_count_nonnegative check (message_count >= 0),
+    constraint conversations_block_count_nonnegative check (block_count >= 0),
+    constraint conversations_user_source_unique unique (user_id, source_name)
 );
 
 create table if not exists public.messages (
@@ -17,7 +20,9 @@ create table if not exists public.messages (
     timestamp timestamptz,
     sender text not null,
     text text not null,
-    raw text not null
+    raw text not null,
+    constraint messages_position_nonnegative check (position >= 0),
+    constraint messages_conversation_position_unique unique (conversation_id, position)
 );
 
 create table if not exists public.blocks (
@@ -29,12 +34,24 @@ create table if not exists public.blocks (
     senders text,
     title text,
     text text not null,
-    message_count integer not null default 0
+    message_count integer not null default 0,
+    constraint blocks_position_nonnegative check (position >= 0),
+    constraint blocks_message_count_nonnegative check (message_count >= 0),
+    constraint blocks_conversation_position_unique unique (conversation_id, position)
 );
 
 create index if not exists conversations_user_id_idx on public.conversations(user_id);
+create index if not exists conversations_user_id_source_name_idx on public.conversations(user_id, source_name);
 create index if not exists messages_conversation_id_position_idx on public.messages(conversation_id, position);
 create index if not exists blocks_conversation_id_position_idx on public.blocks(conversation_id, position);
+
+revoke all on schema public from anon;
+revoke all on public.conversations from anon;
+revoke all on public.messages from anon;
+revoke all on public.blocks from anon;
+revoke all on public.conversations from authenticated;
+revoke all on public.messages from authenticated;
+revoke all on public.blocks from authenticated;
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.conversations to authenticated;
@@ -46,6 +63,9 @@ grant usage, select on sequence public.blocks_id_seq to authenticated;
 alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
 alter table public.blocks enable row level security;
+alter table public.conversations force row level security;
+alter table public.messages force row level security;
+alter table public.blocks force row level security;
 
 drop policy if exists "Users can read their conversations" on public.conversations;
 create policy "Users can read their conversations"
@@ -101,6 +121,24 @@ using (
     )
 );
 
+drop policy if exists "Users can update their messages" on public.messages;
+create policy "Users can update their messages"
+on public.messages for update
+using (
+    exists (
+        select 1 from public.conversations
+        where conversations.id = messages.conversation_id
+        and conversations.user_id = auth.uid()
+    )
+)
+with check (
+    exists (
+        select 1 from public.conversations
+        where conversations.id = messages.conversation_id
+        and conversations.user_id = auth.uid()
+    )
+);
+
 drop policy if exists "Users can read their blocks" on public.blocks;
 create policy "Users can read their blocks"
 on public.blocks for select
@@ -127,6 +165,24 @@ drop policy if exists "Users can delete their blocks" on public.blocks;
 create policy "Users can delete their blocks"
 on public.blocks for delete
 using (
+    exists (
+        select 1 from public.conversations
+        where conversations.id = blocks.conversation_id
+        and conversations.user_id = auth.uid()
+    )
+);
+
+drop policy if exists "Users can update their blocks" on public.blocks;
+create policy "Users can update their blocks"
+on public.blocks for update
+using (
+    exists (
+        select 1 from public.conversations
+        where conversations.id = blocks.conversation_id
+        and conversations.user_id = auth.uid()
+    )
+)
+with check (
     exists (
         select 1 from public.conversations
         where conversations.id = blocks.conversation_id
