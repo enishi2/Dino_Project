@@ -5,3 +5,5 @@ data/
 .env
 .venv/
 .idea/
+node_modules/
+partykit/node_modules/
