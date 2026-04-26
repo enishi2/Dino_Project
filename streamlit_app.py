@@ -682,6 +682,325 @@ def render_multiplayer_guess(messages: list, user_label: str) -> None:
     )
 
 
+def render_coop_puzzle_hub(user_label: str) -> None:
+    partykit_host = os.getenv("PARTYKIT_HOST", "").strip() or "not configured"
+    room_code = st.text_input("Room code", value="coop1", key="coop_room_code")
+    display_name = st.text_input(
+        "Display name",
+        value=user_label or "Player",
+        key="coop_display_name",
+    )
+
+    left_col, right_col = st.columns([0.56, 0.44], gap="large")
+    with left_col:
+        st.markdown(
+            """
+            <div style="padding: 1rem 1.1rem; border-radius: 10px; background: rgba(18,17,13,0.52); border: 1px solid rgba(250,198,62,0.14);">
+                <div style="font-size: 1.03rem; line-height: 1.7;">
+                    This mode will host a real cooperative puzzle game for two players inside Dino Memo.
+                    The first milestone is a shared room where both users see each other moving in real time.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("**Planned MVP levels**")
+        st.markdown(
+            "- `Twin Switch`: both players hold floor switches\n"
+            "- `Box Relay`: one player supports while the other moves a crate\n"
+            "- `Split Paths`: each player opens the other path\n"
+            "- `Power Core`: both carry a shared objective to the exit"
+        )
+
+    with right_col:
+        st.metric("PartyKit host", partykit_host)
+        st.metric("Room", room_code.lower().strip() or "coop1")
+        st.metric("Player", display_name.strip() or "Player")
+
+    payload = json.dumps(
+        {
+            "room": (room_code or "coop1").lower().strip(),
+            "name": display_name.strip() or "Player",
+            "host": partykit_host,
+        }
+    )
+    components.html(
+        f"""
+        <div id="dm-coop-root"></div>
+        <script>
+        const config = {payload};
+        const root = document.getElementById("dm-coop-root");
+        root.innerHTML = `
+          <style>
+            .dm-coop-wrap {{
+              background: rgba(18, 17, 13, 0.58);
+              border: 1px solid rgba(250, 198, 62, 0.14);
+              border-radius: 12px;
+              padding: 1rem;
+              color: #fff4df;
+              font-family: Inter, system-ui, sans-serif;
+            }}
+            .dm-coop-title {{
+              font-size: 1.05rem;
+              margin-bottom: 0.7rem;
+            }}
+            .dm-coop-row {{
+              display: flex;
+              gap: 0.7rem;
+              flex-wrap: wrap;
+              margin-bottom: 0.9rem;
+            }}
+            .dm-coop-button {{
+              border-radius: 999px;
+              border: 1px solid rgba(138, 200, 255, 0.24);
+              background: rgba(138, 200, 255, 0.14);
+              color: #fff4df;
+              padding: 0.7rem 1rem;
+              cursor: pointer;
+              font-weight: 600;
+            }}
+            .dm-coop-button.secondary {{
+              background: rgba(255, 255, 255, 0.06);
+            }}
+            .dm-coop-grid {{
+              position: relative;
+              width: 100%;
+              height: 420px;
+              border-radius: 10px;
+              background:
+                linear-gradient(180deg, #181109 0%, #24190c 100%);
+              overflow: hidden;
+              border: 1px solid rgba(250, 198, 62, 0.14);
+            }}
+            .dm-coop-canvas {{
+              position: absolute;
+              inset: 0;
+              display: grid;
+              grid-template-columns: repeat(12, 1fr);
+              grid-template-rows: repeat(8, 1fr);
+            }}
+            .dm-cell {{
+              border-right: 1px solid rgba(255, 255, 255, 0.04);
+              border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            }}
+            .dm-goal {{
+              background: rgba(127, 196, 255, 0.22);
+            }}
+            .dm-player {{
+              position: absolute;
+              width: calc(100% / 12 - 14px);
+              height: calc(100% / 8 - 14px);
+              border-radius: 14px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 0.78rem;
+              font-weight: 700;
+              color: #111;
+              transition: transform 80ms linear;
+              box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+            }}
+            .dm-status {{
+              margin-top: 0.8rem;
+              padding: 0.85rem 0.95rem;
+              border-radius: 10px;
+              background: rgba(255, 255, 255, 0.06);
+              color: #e9dcc0;
+              line-height: 1.65;
+            }}
+            .dm-score {{
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+              gap: 0.7rem;
+              margin-top: 0.9rem;
+            }}
+            .dm-score-card {{
+              border-radius: 10px;
+              background: rgba(255, 255, 255, 0.06);
+              padding: 0.8rem 0.9rem;
+            }}
+            .dm-help {{
+              color: #d8c7a0;
+              font-size: 0.92rem;
+              margin-top: 0.7rem;
+            }}
+          </style>
+          <div class="dm-coop-wrap">
+            <div class="dm-coop-title">Co-op Puzzle launcher</div>
+            <div class="dm-coop-row">
+              <button id="join-coop" class="dm-coop-button">Join room</button>
+              <button id="reset-coop" class="dm-coop-button secondary">Reset level</button>
+              <button id="next-coop" class="dm-coop-button secondary">Next level</button>
+            </div>
+            <div class="dm-coop-grid">
+              <div id="dm-grid" class="dm-coop-canvas"></div>
+              <div id="dm-players"></div>
+            </div>
+            <div id="dm-status" class="dm-status">Connect to start the shared room.</div>
+            <div id="dm-score" class="dm-score"></div>
+            <div class="dm-help">Move with <strong>WASD</strong> or <strong>arrow keys</strong>. Two players must stand on the blue goal cells together.</div>
+          </div>
+        `;
+
+        const joinButton = root.querySelector("#join-coop");
+        const resetButton = root.querySelector("#reset-coop");
+        const nextButton = root.querySelector("#next-coop");
+        const statusEl = root.querySelector("#dm-status");
+        const scoreEl = root.querySelector("#dm-score");
+        const gridEl = root.querySelector("#dm-grid");
+        const playersEl = root.querySelector("#dm-players");
+
+        for (let i = 0; i < 96; i += 1) {{
+          const cell = document.createElement("div");
+          cell.className = "dm-cell";
+          gridEl.appendChild(cell);
+        }}
+
+        let socket = null;
+        let connectionId = null;
+        let latestState = null;
+        let keyState = {{}};
+        let moveTimer = null;
+
+        function roomUrl() {{
+          const protocol = config.host.includes("localhost") ? "ws" : "wss";
+          return `${{protocol}}://${{config.host}}/party/coop-${{config.room}}`;
+        }}
+
+        function setStatus(text) {{
+          statusEl.innerHTML = text;
+        }}
+
+        function send(type, payload = {{}}) {{
+          if (!socket || socket.readyState !== WebSocket.OPEN) return;
+          socket.send(JSON.stringify({{ type, ...payload }}));
+        }}
+
+        function playerInitials(name) {{
+          return name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+        }}
+
+        function renderCoopState(state) {{
+          latestState = state;
+          const coop = state.coop;
+          if (!coop) {{
+            setStatus("No co-op state available yet.");
+            return;
+          }}
+
+          const level = coop.level;
+          gridEl.style.gridTemplateColumns = `repeat(${{level.width}}, 1fr)`;
+          gridEl.style.gridTemplateRows = `repeat(${{level.height}}, 1fr)`;
+          gridEl.innerHTML = "";
+          for (let y = 0; y < level.height; y += 1) {{
+            for (let x = 0; x < level.width; x += 1) {{
+              const cell = document.createElement("div");
+              cell.className = "dm-cell";
+              const isGoalA = x === level.goalA.x && y === level.goalA.y;
+              const isGoalB = x === level.goalB.x && y === level.goalB.y;
+              if (isGoalA || isGoalB) {{
+                cell.classList.add("dm-goal");
+              }}
+              gridEl.appendChild(cell);
+            }}
+          }}
+
+          const tileWidth = 100 / level.width;
+          const tileHeight = 100 / level.height;
+          playersEl.innerHTML = "";
+          const players = Object.values(coop.players || {{}});
+          players.forEach((player) => {{
+            const node = document.createElement("div");
+            node.className = "dm-player";
+            node.style.background = player.color;
+            node.style.width = `calc(${{tileWidth}}% - 14px)`;
+            node.style.height = `calc(${{tileHeight}}% - 14px)`;
+            node.style.transform = `translate(calc(${{player.x}} * ${{tileWidth}}% + 7px), calc(${{player.y}} * ${{tileHeight}}% + 7px))`;
+            node.textContent = playerInitials(player.name);
+            playersEl.appendChild(node);
+          }});
+
+          const phaseLabel = coop.phase === "playing" ? "Live" : "Waiting";
+          setStatus(
+            `<strong>${{level.name}}</strong><br>` +
+            `Room: <strong>${{state.roomId}}</strong> | Phase: <strong>${{phaseLabel}}</strong><br>` +
+            `${{coop.notice}}`
+          );
+
+          scoreEl.innerHTML = players.map((player) => `
+            <div class="dm-score-card">
+              <strong>${{player.name}}</strong><br>
+              Position: (${{player.x}}, ${{player.y}})<br>
+              ${{player.id === connectionId ? "You" : "Partner"}}
+            </div>
+          `).join("");
+        }}
+
+        function connect() {{
+          if (config.host === "not configured") {{
+            setStatus("Set PARTYKIT_HOST first.");
+            return;
+          }}
+          if (socket) socket.close();
+          socket = new WebSocket(roomUrl());
+          socket.addEventListener("open", () => {{
+            send("join_coop", {{ displayName: config.name }});
+            setStatus(`Connected to room ${{config.room}}.`);
+          }});
+          socket.addEventListener("message", (event) => {{
+            const payload = JSON.parse(event.data);
+            if (payload.type === "session") {{
+              connectionId = payload.connectionId;
+            }}
+            if (payload.type === "state") {{
+              renderCoopState(payload.state);
+            }}
+            if (payload.type === "notice") {{
+              setStatus(payload.message);
+            }}
+          }});
+          socket.addEventListener("close", () => {{
+            setStatus("Disconnected from PartyKit.");
+          }});
+        }}
+
+        function currentMove() {{
+          let dx = 0;
+          let dy = 0;
+          if (keyState["ArrowLeft"] || keyState["a"] || keyState["A"]) dx -= 1;
+          if (keyState["ArrowRight"] || keyState["d"] || keyState["D"]) dx += 1;
+          if (keyState["ArrowUp"] || keyState["w"] || keyState["W"]) dy -= 1;
+          if (keyState["ArrowDown"] || keyState["s"] || keyState["S"]) dy += 1;
+          return {{ dx, dy }};
+        }}
+
+        function startMovementLoop() {{
+          if (moveTimer) clearInterval(moveTimer);
+          moveTimer = setInterval(() => {{
+            const move = currentMove();
+            if (move.dx !== 0 || move.dy !== 0) {{
+              send("move_coop", move);
+            }}
+          }}, 110);
+        }}
+
+        joinButton.addEventListener("click", connect);
+        resetButton.addEventListener("click", () => send("reset_coop"));
+        nextButton.addEventListener("click", () => send("next_coop_level"));
+
+        window.addEventListener("keydown", (event) => {{
+          keyState[event.key] = true;
+        }});
+        window.addEventListener("keyup", (event) => {{
+          keyState[event.key] = false;
+        }});
+        startMovementLoop();
+        </script>
+        """,
+        height=700,
+    )
+
+
 cloud_mode = supabase_store.supabase_configured()
 
 if cloud_mode and ("user" not in st.session_state or "session" not in st.session_state):
@@ -771,7 +1090,9 @@ if not blocks:
 left, right = st.columns([0.68, 0.32], gap="large")
 
 with left:
-    tab_chat, tab_guess, tab_multiplayer = st.tabs(["Chat", "Guess Who Said It", "Multiplayer"])
+    tab_chat, tab_guess, tab_multiplayer, tab_coop = st.tabs(
+        ["Chat", "Guess Who Said It", "Multiplayer", "Co-op Puzzle"]
+    )
 
     with tab_chat:
         st.subheader("Bot")
@@ -882,6 +1203,14 @@ with left:
         if cloud_mode and "user" in st.session_state:
             user_label = st.session_state["user"].email.split("@", 1)[0]
         render_multiplayer_guess(messages, user_label)
+
+    with tab_coop:
+        st.subheader("Co-op Puzzle")
+        st.caption("A shared puzzle game for two Dino Memo users, played live in the same room.")
+        user_label = ""
+        if cloud_mode and "user" in st.session_state:
+            user_label = st.session_state["user"].email.split("@", 1)[0]
+        render_coop_puzzle_hub(user_label)
 
 with right:
     st.subheader("Knowledge Base Summary")
