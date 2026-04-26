@@ -871,7 +871,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           }}
 
           const level = coop.level;
-          if (!level || !level.width || !level.height || !level.gate || !level.exit) {{
+          if (!level || !level.worldWidth || !level.worldHeight || !level.gate || !level.exit) {{
             setStatus("This room is using an outdated co-op state. Try a new room code or redeploy PartyKit.");
             return;
           }}
