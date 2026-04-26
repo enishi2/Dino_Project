@@ -25,12 +25,27 @@ type RoundState = {
   lastCorrect: string | null;
 };
 
+type Rect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type SwitchTile = {
+  id: string;
+  x: number;
+  y: number;
+};
+
 type CoopPlayer = {
   id: string;
   name: string;
   color: string;
   x: number;
   y: number;
+  spawnX: number;
+  spawnY: number;
 };
 
 type CoopLevel = {
@@ -38,16 +53,21 @@ type CoopLevel = {
   name: string;
   width: number;
   height: number;
+  solids: Rect[];
+  switches: SwitchTile[];
+  gate: Rect;
+  exit: Rect;
   spawnA: { x: number; y: number };
   spawnB: { x: number; y: number };
-  goalA: { x: number; y: number };
-  goalB: { x: number; y: number };
 };
 
 type CoopState = {
   phase: "waiting" | "playing";
   level: CoopLevel;
   players: Record<string, CoopPlayer>;
+  pressedSwitches: string[];
+  gateOpen: boolean;
+  levelComplete: boolean;
   notice: string;
 };
 
@@ -67,22 +87,46 @@ const COOP_LEVELS: CoopLevel[] = [
   {
     index: 0,
     name: "Twin Switch",
-    width: 12,
-    height: 8,
-    spawnA: { x: 1, y: 3 },
-    spawnB: { x: 10, y: 3 },
-    goalA: { x: 5, y: 1 },
-    goalB: { x: 6, y: 1 },
+    width: 18,
+    height: 10,
+    solids: [
+      { x: 0, y: 9, w: 18, h: 1 },
+      { x: 1, y: 7, w: 4, h: 1 },
+      { x: 13, y: 7, w: 4, h: 1 },
+      { x: 6, y: 5, w: 2, h: 1 },
+      { x: 10, y: 5, w: 2, h: 1 },
+      { x: 7, y: 3, w: 4, h: 1 },
+    ],
+    switches: [
+      { id: "left", x: 2, y: 6 },
+      { id: "right", x: 15, y: 6 },
+    ],
+    gate: { x: 8, y: 6, w: 2, h: 3 },
+    exit: { x: 7, y: 2, w: 4, h: 1 },
+    spawnA: { x: 2, y: 6 },
+    spawnB: { x: 15, y: 6 },
   },
   {
     index: 1,
-    name: "Split Paths",
-    width: 12,
-    height: 8,
+    name: "Bridge Run",
+    width: 18,
+    height: 10,
+    solids: [
+      { x: 0, y: 9, w: 18, h: 1 },
+      { x: 1, y: 7, w: 3, h: 1 },
+      { x: 14, y: 7, w: 3, h: 1 },
+      { x: 5, y: 6, w: 3, h: 1 },
+      { x: 10, y: 4, w: 3, h: 1 },
+      { x: 6, y: 2, w: 6, h: 1 },
+    ],
+    switches: [
+      { id: "left", x: 2, y: 6 },
+      { id: "right", x: 15, y: 6 },
+    ],
+    gate: { x: 8, y: 4, w: 2, h: 5 },
+    exit: { x: 7, y: 1, w: 4, h: 1 },
     spawnA: { x: 2, y: 6 },
-    spawnB: { x: 9, y: 6 },
-    goalA: { x: 5, y: 1 },
-    goalB: { x: 6, y: 1 },
+    spawnB: { x: 15, y: 6 },
   },
 ];
 
@@ -90,6 +134,9 @@ const defaultCoopState = (): CoopState => ({
   phase: "waiting",
   level: COOP_LEVELS[0],
   players: {},
+  pressedSwitches: [],
+  gateOpen: false,
+  levelComplete: false,
   notice: "Waiting for two players.",
 });
 
@@ -131,31 +178,24 @@ export default class Server implements Party.Server {
       case "join":
         await this.handleGuessJoin(sender, payload.displayName);
         return;
-
       case "seed_quotes":
         await this.handleSeedQuotes(payload);
         return;
-
       case "next_round":
         await this.handleNextRound();
         return;
-
       case "submit_guess":
         await this.handleSubmitGuess(sender, payload.answer);
         return;
-
       case "join_coop":
         await this.handleCoopJoin(sender, payload.displayName);
         return;
-
       case "move_coop":
-        this.handleCoopMove(sender, payload.dx, payload.dy);
+        this.handleCoopMove(sender, payload.dx, payload.dy, payload.jump);
         return;
-
       case "reset_coop":
         await this.resetCoopLevel();
         return;
-
       case "next_coop_level":
         await this.advanceCoopLevel();
         return;
@@ -176,6 +216,7 @@ export default class Server implements Party.Server {
     if (coopPlayer) {
       delete this.state.coop.players[connection.id];
       this.updateCoopPhase();
+      this.refreshCoopPuzzleState();
       changed = true;
       this.notice(`${coopPlayer.name} left the co-op room.`);
     }
@@ -250,6 +291,7 @@ export default class Server implements Party.Server {
     if (existing) {
       existing.name = displayName || existing.name;
       this.updateCoopPhase();
+      this.refreshCoopPuzzleState();
       await this.persist();
       this.broadcastState();
       return;
@@ -268,52 +310,71 @@ export default class Server implements Party.Server {
       color: COOP_COLORS[slot] || "#ffffff",
       x: spawn.x,
       y: spawn.y,
+      spawnX: spawn.x,
+      spawnY: spawn.y,
     };
     this.updateCoopPhase();
+    this.refreshCoopPuzzleState();
     await this.persist();
     this.broadcastState();
     this.notice(`${displayName || "A player"} joined the co-op room.`);
   }
 
-  private handleCoopMove(sender: Party.Connection, dx: number, dy: number) {
+  private handleCoopMove(sender: Party.Connection, dx: number, dy: number, jump?: boolean) {
     const player = this.state.coop.players[sender.id];
     if (!player) {
       return;
     }
-    const nextX = clamp(player.x + normalizeStep(dx), 0, this.state.coop.level.width - 1);
-    const nextY = clamp(player.y + normalizeStep(dy), 0, this.state.coop.level.height - 1);
-    if (nextX === player.x && nextY === player.y) {
-      return;
-    }
-    player.x = nextX;
-    player.y = nextY;
 
-    if (this.isCoopLevelComplete()) {
-      this.state.coop.notice = "Level complete. Press next level.";
-    } else {
-      this.state.coop.notice =
-        this.state.coop.phase === "playing"
-          ? "Reach the two blue goal cells together."
-          : "Waiting for two players.";
+    if (jump && this.isStanding(player.x, player.y)) {
+      const jumpHeight = 2;
+      let targetY = player.y;
+      for (let step = 1; step <= jumpHeight; step += 1) {
+        const maybeY = player.y - step;
+        if (maybeY >= 0 && this.isFree(player.x, maybeY)) {
+          targetY = maybeY;
+        }
+      }
+      player.y = targetY;
     }
 
+    const stepX = normalizeStep(dx);
+    if (stepX !== 0) {
+      const nextX = clamp(player.x + stepX, 0, this.state.coop.level.width - 1);
+      if (this.isFree(nextX, player.y)) {
+        player.x = nextX;
+      }
+    }
+
+    if (!this.isStanding(player.x, player.y)) {
+      const nextY = clamp(player.y + 1, 0, this.state.coop.level.height - 1);
+      if (this.isFree(player.x, nextY)) {
+        player.y = nextY;
+      }
+    }
+
+    this.refreshCoopPuzzleState();
     this.broadcastState();
   }
 
   private async resetCoopLevel() {
-    const ids = Object.keys(this.state.coop.players);
-    ids.forEach((playerId, index) => {
+    const playerIds = Object.keys(this.state.coop.players);
+    playerIds.forEach((playerId, index) => {
       const spawn = index === 0 ? this.state.coop.level.spawnA : this.state.coop.level.spawnB;
-      this.state.coop.players[playerId].x = spawn.x;
-      this.state.coop.players[playerId].y = spawn.y;
+      const player = this.state.coop.players[playerId];
+      player.x = spawn.x;
+      player.y = spawn.y;
+      player.spawnX = spawn.x;
+      player.spawnY = spawn.y;
     });
     this.updateCoopPhase();
+    this.refreshCoopPuzzleState();
     await this.persist();
     this.broadcastState();
   }
 
   private async advanceCoopLevel() {
-    if (!this.isCoopLevelComplete()) {
+    if (!this.state.coop.levelComplete) {
       return;
     }
     const nextIndex = (this.state.coop.level.index + 1) % COOP_LEVELS.length;
@@ -325,22 +386,49 @@ export default class Server implements Party.Server {
     const playerCount = Object.keys(this.state.coop.players).length;
     this.state.coop.phase = playerCount >= 2 ? "playing" : "waiting";
     this.state.coop.notice =
-      playerCount >= 2 ? "Reach the two blue goal cells together." : "Waiting for two players.";
+      playerCount >= 2 ? "Stand on both switches to open the gate." : "Waiting for two players.";
   }
 
-  private isCoopLevelComplete(): boolean {
+  private refreshCoopPuzzleState() {
     const players = Object.values(this.state.coop.players);
-    if (players.length < 2) {
+    const pressedSwitches = this.state.coop.level.switches
+      .filter((switchTile) => players.some((player) => player.x === switchTile.x && player.y === switchTile.y))
+      .map((switchTile) => switchTile.id);
+    this.state.coop.pressedSwitches = pressedSwitches;
+    this.state.coop.gateOpen = pressedSwitches.length === this.state.coop.level.switches.length;
+    this.state.coop.levelComplete = this.state.coop.gateOpen && players.length === 2 && players.every((player) => this.isInsideRect(player.x, player.y, this.state.coop.level.exit));
+
+    if (this.state.coop.levelComplete) {
+      this.state.coop.notice = "Level complete. Press next level.";
+    } else if (this.state.coop.phase === "playing") {
+      this.state.coop.notice = this.state.coop.gateOpen
+        ? "Gate open. Reach the green exit platform together."
+        : "Stand on both switches to open the gate.";
+    }
+  }
+
+  private isStanding(x: number, y: number): boolean {
+    if (y >= this.state.coop.level.height - 1) {
+      return true;
+    }
+    return !this.isFree(x, y + 1);
+  }
+
+  private isFree(x: number, y: number): boolean {
+    if (x < 0 || y < 0 || x >= this.state.coop.level.width || y >= this.state.coop.level.height) {
       return false;
     }
-    const [first, second] = players;
-    const goalA = this.state.coop.level.goalA;
-    const goalB = this.state.coop.level.goalB;
-    const aMatches =
-      first.x === goalA.x && first.y === goalA.y && second.x === goalB.x && second.y === goalB.y;
-    const bMatches =
-      second.x === goalA.x && second.y === goalA.y && first.x === goalB.x && first.y === goalB.y;
-    return aMatches || bMatches;
+    if (this.state.coop.level.solids.some((rect) => this.isInsideRect(x, y, rect))) {
+      return false;
+    }
+    if (!this.state.coop.gateOpen && this.isInsideRect(x, y, this.state.coop.level.gate)) {
+      return false;
+    }
+    return true;
+  }
+
+  private isInsideRect(x: number, y: number, rect: Rect): boolean {
+    return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
   }
 
   private makeRound(): RoundState {

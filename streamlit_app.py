@@ -775,21 +775,45 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             .dm-coop-canvas {{
               position: absolute;
               inset: 0;
-              display: grid;
-              grid-template-columns: repeat(12, 1fr);
-              grid-template-rows: repeat(8, 1fr);
             }}
             .dm-cell {{
+              position: absolute;
               border-right: 1px solid rgba(255, 255, 255, 0.04);
               border-bottom: 1px solid rgba(255, 255, 255, 0.04);
             }}
-            .dm-goal {{
-              background: rgba(127, 196, 255, 0.22);
+            .dm-platform {{
+              position: absolute;
+              background: rgba(255, 255, 255, 0.16);
+              border: 1px solid rgba(255, 255, 255, 0.06);
+              border-radius: 8px;
+            }}
+            .dm-switch {{
+              position: absolute;
+              background: rgba(247, 209, 84, 0.92);
+              border-radius: 999px;
+              border: 1px solid rgba(17, 17, 17, 0.4);
+            }}
+            .dm-switch.active {{
+              background: rgba(114, 236, 151, 0.96);
+            }}
+            .dm-gate {{
+              position: absolute;
+              background: rgba(190, 92, 92, 0.88);
+              border: 1px solid rgba(17, 17, 17, 0.35);
+              border-radius: 8px;
+            }}
+            .dm-gate.open {{
+              background: rgba(127, 196, 255, 0.14);
+              border-style: dashed;
+            }}
+            .dm-exit {{
+              position: absolute;
+              background: rgba(114, 236, 151, 0.24);
+              border: 1px solid rgba(114, 236, 151, 0.45);
+              border-radius: 10px;
             }}
             .dm-player {{
               position: absolute;
-              width: calc(100% / 12 - 14px);
-              height: calc(100% / 8 - 14px);
               border-radius: 14px;
               display: flex;
               align-items: center;
@@ -838,7 +862,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             </div>
             <div id="dm-status" class="dm-status">Connect to start the shared room.</div>
             <div id="dm-score" class="dm-score"></div>
-            <div class="dm-help">Move with <strong>WASD</strong> or <strong>arrow keys</strong>. Two players must stand on the blue goal cells together.</div>
+            <div class="dm-help">Move with <strong>A/D</strong> or <strong>left/right</strong>. Jump with <strong>W</strong> or <strong>up</strong>. Hold both yellow switches to open the gate, then reach the green exit together.</div>
           </div>
         `;
 
@@ -849,12 +873,6 @@ def render_coop_puzzle_hub(user_label: str) -> None:
         const scoreEl = root.querySelector("#dm-score");
         const gridEl = root.querySelector("#dm-grid");
         const playersEl = root.querySelector("#dm-players");
-
-        for (let i = 0; i < 96; i += 1) {{
-          const cell = document.createElement("div");
-          cell.className = "dm-cell";
-          gridEl.appendChild(cell);
-        }}
 
         let socket = null;
         let connectionId = null;
@@ -889,24 +907,64 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           }}
 
           const level = coop.level;
-          gridEl.style.gridTemplateColumns = `repeat(${{level.width}}, 1fr)`;
-          gridEl.style.gridTemplateRows = `repeat(${{level.height}}, 1fr)`;
           gridEl.innerHTML = "";
           for (let y = 0; y < level.height; y += 1) {{
             for (let x = 0; x < level.width; x += 1) {{
               const cell = document.createElement("div");
               cell.className = "dm-cell";
-              const isGoalA = x === level.goalA.x && y === level.goalA.y;
-              const isGoalB = x === level.goalB.x && y === level.goalB.y;
-              if (isGoalA || isGoalB) {{
-                cell.classList.add("dm-goal");
-              }}
+              cell.style.left = `${{x * (100 / level.width)}}%`;
+              cell.style.top = `${{y * (100 / level.height)}}%`;
+              cell.style.width = `calc(${100 / level.width}% - 1px)`;
+              cell.style.height = `calc(${100 / level.height}% - 1px)`;
               gridEl.appendChild(cell);
             }}
           }}
 
           const tileWidth = 100 / level.width;
           const tileHeight = 100 / level.height;
+
+          (level.solids || []).forEach((rect) => {{
+            const node = document.createElement("div");
+            node.className = "dm-platform";
+            node.style.left = `${{rect.x * tileWidth}}%`;
+            node.style.top = `${{rect.y * tileHeight}}%`;
+            node.style.width = `${{rect.w * tileWidth}}%`;
+            node.style.height = `${{rect.h * tileHeight}}%`;
+            gridEl.appendChild(node);
+          }});
+
+          (level.switches || []).forEach((switchTile) => {{
+            const node = document.createElement("div");
+            node.className = "dm-switch";
+            if ((coop.pressedSwitches || []).includes(switchTile.id)) {{
+              node.classList.add("active");
+            }}
+            node.style.left = `calc(${{switchTile.x * tileWidth}}% + 12px)`;
+            node.style.top = `calc(${{switchTile.y * tileHeight}}% + 18px)`;
+            node.style.width = `calc(${{tileWidth}}% - 24px)`;
+            node.style.height = `14px`;
+            gridEl.appendChild(node);
+          }});
+
+          const gate = document.createElement("div");
+          gate.className = "dm-gate";
+          if (coop.gateOpen) {{
+            gate.classList.add("open");
+          }}
+          gate.style.left = `${{level.gate.x * tileWidth}}%`;
+          gate.style.top = `${{level.gate.y * tileHeight}}%`;
+          gate.style.width = `${{level.gate.w * tileWidth}}%`;
+          gate.style.height = `${{level.gate.h * tileHeight}}%`;
+          gridEl.appendChild(gate);
+
+          const exit = document.createElement("div");
+          exit.className = "dm-exit";
+          exit.style.left = `${{level.exit.x * tileWidth}}%`;
+          exit.style.top = `${{level.exit.y * tileHeight}}%`;
+          exit.style.width = `${{level.exit.w * tileWidth}}%`;
+          exit.style.height = `${{level.exit.h * tileHeight}}%`;
+          gridEl.appendChild(exit);
+
           playersEl.innerHTML = "";
           const players = Object.values(coop.players || {{}});
           players.forEach((player) => {{
@@ -966,19 +1024,17 @@ def render_coop_puzzle_hub(user_label: str) -> None:
 
         function currentMove() {{
           let dx = 0;
-          let dy = 0;
           if (keyState["ArrowLeft"] || keyState["a"] || keyState["A"]) dx -= 1;
           if (keyState["ArrowRight"] || keyState["d"] || keyState["D"]) dx += 1;
-          if (keyState["ArrowUp"] || keyState["w"] || keyState["W"]) dy -= 1;
-          if (keyState["ArrowDown"] || keyState["s"] || keyState["S"]) dy += 1;
-          return {{ dx, dy }};
+          const jump = !!(keyState["ArrowUp"] || keyState["w"] || keyState["W"] || keyState[" "]);
+          return {{ dx, dy: 0, jump }};
         }}
 
         function startMovementLoop() {{
           if (moveTimer) clearInterval(moveTimer);
           moveTimer = setInterval(() => {{
             const move = currentMove();
-            if (move.dx !== 0 || move.dy !== 0) {{
+            if (move.dx !== 0 || move.jump) {{
               send("move_coop", move);
             }}
           }}, 110);
@@ -989,9 +1045,15 @@ def render_coop_puzzle_hub(user_label: str) -> None:
         nextButton.addEventListener("click", () => send("next_coop_level"));
 
         window.addEventListener("keydown", (event) => {{
+          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {{
+            event.preventDefault();
+          }}
           keyState[event.key] = true;
         }});
         window.addEventListener("keyup", (event) => {{
+          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {{
+            event.preventDefault();
+          }}
           keyState[event.key] = false;
         }});
         startMovementLoop();
