@@ -914,8 +914,8 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               cell.className = "dm-cell";
               cell.style.left = `${{x * (100 / level.width)}}%`;
               cell.style.top = `${{y * (100 / level.height)}}%`;
-              cell.style.width = `calc(${100 / level.width}% - 1px)`;
-              cell.style.height = `calc(${100 / level.height}% - 1px)`;
+              cell.style.width = `calc(${{100 / level.width}}% - 1px)`;
+              cell.style.height = `calc(${{100 / level.height}}% - 1px)`;
               gridEl.appendChild(cell);
             }}
           }}
