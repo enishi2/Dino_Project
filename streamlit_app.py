@@ -826,7 +826,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               font-size: 0.78rem;
               font-weight: 700;
               color: #111;
-              transition: transform 80ms linear;
+              transition: left 80ms linear, top 80ms linear;
               box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
             }}
             .dm-status {{
@@ -982,7 +982,8 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             node.style.background = player.color;
             node.style.width = `calc(${{tileWidth}}% - 14px)`;
             node.style.height = `calc(${{tileHeight}}% - 14px)`;
-            node.style.transform = `translate(calc(${{player.x}} * ${{tileWidth}}% + 7px), calc(${{player.y}} * ${{tileHeight}}% + 7px))`;
+            node.style.left = `calc(${{player.x * tileWidth}}% + 7px)`;
+            node.style.top = `calc(${{player.y * tileHeight}}% + 7px)`;
             node.textContent = playerInitials(player.name);
             playersEl.appendChild(node);
           }});
