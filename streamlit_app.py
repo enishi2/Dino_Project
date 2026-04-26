@@ -776,6 +776,11 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               position: absolute;
               inset: 0;
             }}
+            #dm-players {{
+              position: absolute;
+              inset: 0;
+              pointer-events: none;
+            }}
             .dm-cell {{
               position: absolute;
               border-right: 1px solid rgba(255, 255, 255, 0.04);
@@ -907,6 +912,10 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           }}
 
           const level = coop.level;
+          if (!level || !level.width || !level.height || !level.gate || !level.exit) {{
+            setStatus("This room is using an outdated co-op state. Try a new room code or redeploy PartyKit.");
+            return;
+          }}
           gridEl.innerHTML = "";
           for (let y = 0; y < level.height; y += 1) {{
             for (let x = 0; x < level.width; x += 1) {{
