@@ -762,72 +762,13 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             .dm-coop-button.secondary {{
               background: rgba(255, 255, 255, 0.06);
             }}
-            .dm-coop-grid {{
-              position: relative;
+            .dm-coop-game {{
               width: 100%;
-              height: 420px;
+              height: 460px;
               border-radius: 10px;
-              background:
-                linear-gradient(180deg, #181109 0%, #24190c 100%);
+              background: linear-gradient(180deg, #181109 0%, #24190c 100%);
               overflow: hidden;
               border: 1px solid rgba(250, 198, 62, 0.14);
-            }}
-            .dm-coop-canvas {{
-              position: absolute;
-              inset: 0;
-            }}
-            #dm-players {{
-              position: absolute;
-              inset: 0;
-              pointer-events: none;
-            }}
-            .dm-cell {{
-              position: absolute;
-              border-right: 1px solid rgba(255, 255, 255, 0.04);
-              border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-            }}
-            .dm-platform {{
-              position: absolute;
-              background: rgba(255, 255, 255, 0.16);
-              border: 1px solid rgba(255, 255, 255, 0.06);
-              border-radius: 8px;
-            }}
-            .dm-switch {{
-              position: absolute;
-              background: rgba(247, 209, 84, 0.92);
-              border-radius: 999px;
-              border: 1px solid rgba(17, 17, 17, 0.4);
-            }}
-            .dm-switch.active {{
-              background: rgba(114, 236, 151, 0.96);
-            }}
-            .dm-gate {{
-              position: absolute;
-              background: rgba(190, 92, 92, 0.88);
-              border: 1px solid rgba(17, 17, 17, 0.35);
-              border-radius: 8px;
-            }}
-            .dm-gate.open {{
-              background: rgba(127, 196, 255, 0.14);
-              border-style: dashed;
-            }}
-            .dm-exit {{
-              position: absolute;
-              background: rgba(114, 236, 151, 0.24);
-              border: 1px solid rgba(114, 236, 151, 0.45);
-              border-radius: 10px;
-            }}
-            .dm-player {{
-              position: absolute;
-              border-radius: 14px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 0.78rem;
-              font-weight: 700;
-              color: #111;
-              transition: left 80ms linear, top 80ms linear;
-              box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
             }}
             .dm-status {{
               margin-top: 0.8rem;
@@ -861,10 +802,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               <button id="reset-coop" class="dm-coop-button secondary">Reset level</button>
               <button id="next-coop" class="dm-coop-button secondary">Next level</button>
             </div>
-            <div class="dm-coop-grid">
-              <div id="dm-grid" class="dm-coop-canvas"></div>
-              <div id="dm-players"></div>
-            </div>
+            <div id="dm-game" class="dm-coop-game"></div>
             <div id="dm-status" class="dm-status">Connect to start the shared room.</div>
             <div id="dm-score" class="dm-score"></div>
             <div class="dm-help">Move with <strong>A/D</strong> or <strong>left/right</strong>. Jump with <strong>W</strong> or <strong>up</strong>. Hold both yellow switches to open the gate, then reach the green exit together.</div>
@@ -876,14 +814,35 @@ def render_coop_puzzle_hub(user_label: str) -> None:
         const nextButton = root.querySelector("#next-coop");
         const statusEl = root.querySelector("#dm-status");
         const scoreEl = root.querySelector("#dm-score");
-        const gridEl = root.querySelector("#dm-grid");
-        const playersEl = root.querySelector("#dm-players");
+        const gameHost = root.querySelector("#dm-game");
 
         let socket = null;
         let connectionId = null;
         let latestState = null;
-        let keyState = {{}};
         let moveTimer = null;
+        let jumpLock = false;
+        let game = null;
+        let sceneRef = null;
+
+        function loadScript(src) {{
+          return new Promise((resolve, reject) => {{
+            const existing = document.querySelector(`script[src="${{src}}"]`);
+            if (existing) {{
+              existing.addEventListener("load", resolve, {{ once: true }});
+              if (existing.dataset.loaded === "true") resolve();
+              return;
+            }}
+            const script = document.createElement("script");
+            script.src = src;
+            script.async = true;
+            script.onload = () => {{
+              script.dataset.loaded = "true";
+              resolve();
+            }};
+            script.onerror = reject;
+            document.head.appendChild(script);
+          }});
+        }}
 
         function roomUrl() {{
           const protocol = config.host.includes("localhost") ? "ws" : "wss";
@@ -916,77 +875,10 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             setStatus("This room is using an outdated co-op state. Try a new room code or redeploy PartyKit.");
             return;
           }}
-          gridEl.innerHTML = "";
-          for (let y = 0; y < level.height; y += 1) {{
-            for (let x = 0; x < level.width; x += 1) {{
-              const cell = document.createElement("div");
-              cell.className = "dm-cell";
-              cell.style.left = `${{x * (100 / level.width)}}%`;
-              cell.style.top = `${{y * (100 / level.height)}}%`;
-              cell.style.width = `calc(${{100 / level.width}}% - 1px)`;
-              cell.style.height = `calc(${{100 / level.height}}% - 1px)`;
-              gridEl.appendChild(cell);
-            }}
-          }}
-
-          const tileWidth = 100 / level.width;
-          const tileHeight = 100 / level.height;
-
-          (level.solids || []).forEach((rect) => {{
-            const node = document.createElement("div");
-            node.className = "dm-platform";
-            node.style.left = `${{rect.x * tileWidth}}%`;
-            node.style.top = `${{rect.y * tileHeight}}%`;
-            node.style.width = `${{rect.w * tileWidth}}%`;
-            node.style.height = `${{rect.h * tileHeight}}%`;
-            gridEl.appendChild(node);
-          }});
-
-          (level.switches || []).forEach((switchTile) => {{
-            const node = document.createElement("div");
-            node.className = "dm-switch";
-            if ((coop.pressedSwitches || []).includes(switchTile.id)) {{
-              node.classList.add("active");
-            }}
-            node.style.left = `calc(${{switchTile.x * tileWidth}}% + 12px)`;
-            node.style.top = `calc(${{switchTile.y * tileHeight}}% + 18px)`;
-            node.style.width = `calc(${{tileWidth}}% - 24px)`;
-            node.style.height = `14px`;
-            gridEl.appendChild(node);
-          }});
-
-          const gate = document.createElement("div");
-          gate.className = "dm-gate";
-          if (coop.gateOpen) {{
-            gate.classList.add("open");
-          }}
-          gate.style.left = `${{level.gate.x * tileWidth}}%`;
-          gate.style.top = `${{level.gate.y * tileHeight}}%`;
-          gate.style.width = `${{level.gate.w * tileWidth}}%`;
-          gate.style.height = `${{level.gate.h * tileHeight}}%`;
-          gridEl.appendChild(gate);
-
-          const exit = document.createElement("div");
-          exit.className = "dm-exit";
-          exit.style.left = `${{level.exit.x * tileWidth}}%`;
-          exit.style.top = `${{level.exit.y * tileHeight}}%`;
-          exit.style.width = `${{level.exit.w * tileWidth}}%`;
-          exit.style.height = `${{level.exit.h * tileHeight}}%`;
-          gridEl.appendChild(exit);
-
-          playersEl.innerHTML = "";
           const players = Object.values(coop.players || {{}});
-          players.forEach((player) => {{
-            const node = document.createElement("div");
-            node.className = "dm-player";
-            node.style.background = player.color;
-            node.style.width = `calc(${{tileWidth}}% - 14px)`;
-            node.style.height = `calc(${{tileHeight}}% - 14px)`;
-            node.style.left = `calc(${{player.x * tileWidth}}% + 7px)`;
-            node.style.top = `calc(${{player.y * tileHeight}}% + 7px)`;
-            node.textContent = playerInitials(player.name);
-            playersEl.appendChild(node);
-          }});
+          if (sceneRef) {{
+            sceneRef.renderRoom(coop);
+          }}
 
           const phaseLabel = coop.phase === "playing" ? "Live" : "Waiting";
           setStatus(
@@ -1002,6 +894,195 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               ${{player.id === connectionId ? "You" : "Partner"}}
             </div>
           `).join("");
+        }}
+
+        function currentMove() {{
+          if (!sceneRef) return {{ dx: 0, dy: 0, jump: false }};
+          const keys = sceneRef.keys;
+          if (!keys) return {{ dx: 0, dy: 0, jump: false }};
+          let dx = 0;
+          if (keys.left.isDown || keys.a.isDown) dx -= 1;
+          if (keys.right.isDown || keys.d.isDown) dx += 1;
+          const jumpPressed = keys.up.isDown || keys.w.isDown || keys.space.isDown;
+          const jump = jumpPressed && !jumpLock;
+          jumpLock = jumpPressed;
+          return {{ dx, dy: 0, jump }};
+        }}
+
+        function buildGame() {{
+          if (game || !window.Phaser) return;
+          class CoopScene extends window.Phaser.Scene {{
+            constructor() {{
+              super("coop-scene");
+              this.levelKey = null;
+              this.platforms = [];
+              this.switches = [];
+              this.players = new Map();
+              this.exitZone = null;
+              this.gate = null;
+              this.keys = null;
+            }}
+
+            create() {{
+              this.cameras.main.setBackgroundColor("#1a1208");
+              this.keys = {{
+                left: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.LEFT),
+                right: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.RIGHT),
+                up: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.UP),
+                a: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.A),
+                d: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.D),
+                w: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.W),
+                space: this.input.keyboard.addKey(window.Phaser.Input.Keyboard.KeyCodes.SPACE),
+              }};
+              this.input.keyboard.on("keydown", (event) => {{
+                if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {{
+                  event.preventDefault();
+                }}
+              }});
+            }}
+
+            renderRoom(coop) {{
+              const level = coop.level;
+              const levelKey = JSON.stringify({{ index: level.index, gateOpen: coop.gateOpen, pressed: coop.pressedSwitches }});
+              if (this.levelKey !== levelKey) {{
+                this.levelKey = levelKey;
+                this.children.removeAll();
+                this.platforms = [];
+                this.switches = [];
+                this.players.clear();
+                this.drawLevel(level, coop);
+              }} else {{
+                this.updateDynamicLevel(coop);
+              }}
+              this.renderPlayers(level, coop.players || {{}});
+            }}
+
+            drawLevel(level, coop) {{
+              const padX = 28;
+              const padY = 22;
+              const tileW = (this.scale.width - padX * 2) / level.width;
+              const tileH = (this.scale.height - padY * 2) / level.height;
+              for (let y = 0; y < level.height; y += 1) {{
+                for (let x = 0; x < level.width; x += 1) {{
+                  const cell = this.add.rectangle(
+                    padX + x * tileW + tileW / 2,
+                    padY + y * tileH + tileH / 2,
+                    tileW - 1,
+                    tileH - 1,
+                    0xffffff,
+                    0.03
+                  );
+                  cell.setStrokeStyle(1, 0xffffff, 0.04);
+                }}
+              }}
+              (level.solids || []).forEach((rect) => {{
+                const node = this.add.rectangle(
+                  padX + rect.x * tileW + (rect.w * tileW) / 2,
+                  padY + rect.y * tileH + (rect.h * tileH) / 2,
+                  rect.w * tileW - 4,
+                  rect.h * tileH - 4,
+                  0x6b6257,
+                  0.88
+                );
+                node.setStrokeStyle(1, 0xffffff, 0.08);
+                this.platforms.push(node);
+              }});
+              this.exitZone = this.add.rectangle(
+                padX + level.exit.x * tileW + (level.exit.w * tileW) / 2,
+                padY + level.exit.y * tileH + (level.exit.h * tileH) / 2,
+                level.exit.w * tileW - 4,
+                level.exit.h * tileH - 4,
+                0x47d27b,
+                0.28
+              );
+              this.exitZone.setStrokeStyle(2, 0x72ec97, 0.7);
+              this.gate = this.add.rectangle(
+                padX + level.gate.x * tileW + (level.gate.w * tileW) / 2,
+                padY + level.gate.y * tileH + (level.gate.h * tileH) / 2,
+                level.gate.w * tileW - 6,
+                level.gate.h * tileH - 6,
+                coop.gateOpen ? 0x7fc4ff : 0xbe5c5c,
+                coop.gateOpen ? 0.2 : 0.95
+              );
+              this.gate.setStrokeStyle(2, coop.gateOpen ? 0x7fc4ff : 0x743838, 0.8);
+
+              (level.switches || []).forEach((switchTile) => {{
+                const active = (coop.pressedSwitches || []).includes(switchTile.id);
+                const node = this.add.rectangle(
+                  padX + switchTile.x * tileW + tileW / 2,
+                  padY + switchTile.y * tileH + tileH * 0.8,
+                  tileW - 24,
+                  14,
+                  active ? 0x72ec97 : 0xf7d154,
+                  0.98
+                );
+                node.setStrokeStyle(1, 0x111111, 0.35);
+                this.switches.push({{ id: switchTile.id, node }});
+              }});
+            }}
+
+            updateDynamicLevel(coop) {{
+              if (this.gate) {{
+                this.gate.setFillStyle(coop.gateOpen ? 0x7fc4ff : 0xbe5c5c, coop.gateOpen ? 0.2 : 0.95);
+                this.gate.setStrokeStyle(2, coop.gateOpen ? 0x7fc4ff : 0x743838, 0.8);
+              }}
+              this.switches.forEach((item) => {{
+                const active = (coop.pressedSwitches || []).includes(item.id);
+                item.node.setFillStyle(active ? 0x72ec97 : 0xf7d154, 0.98);
+              }});
+            }}
+
+            renderPlayers(level, playersById) {{
+              const padX = 28;
+              const padY = 22;
+              const tileW = (this.scale.width - padX * 2) / level.width;
+              const tileH = (this.scale.height - padY * 2) / level.height;
+              const alive = new Set(Object.keys(playersById || {{}}));
+              Object.values(playersById || {{}}).forEach((player) => {{
+                const px = padX + player.x * tileW + tileW / 2;
+                const py = padY + player.y * tileH + tileH / 2;
+                let sprite = this.players.get(player.id);
+                if (!sprite) {{
+                  const body = this.add.rectangle(px, py, tileW - 14, tileH - 14, parseInt(player.color.replace("#", ""), 16), 1);
+                  body.setStrokeStyle(2, 0x111111, 0.4);
+                  const label = this.add.text(px, py, playerInitials(player.name), {{
+                    fontFamily: "Inter, system-ui, sans-serif",
+                    fontSize: "14px",
+                    color: "#111111",
+                  }}).setOrigin(0.5);
+                  sprite = {{ body, label }};
+                  this.players.set(player.id, sprite);
+                }}
+                this.tweens.add({{
+                  targets: [sprite.body, sprite.label],
+                  x: px,
+                  y: py,
+                  duration: 90,
+                  ease: "Quad.out",
+                }});
+              }});
+              for (const [playerId, sprite] of this.players.entries()) {{
+                if (!alive.has(playerId)) {{
+                  sprite.body.destroy();
+                  sprite.label.destroy();
+                  this.players.delete(playerId);
+                }}
+              }}
+            }}
+          }}
+          sceneRef = new CoopScene();
+          game = new window.Phaser.Game({{
+            type: window.Phaser.AUTO,
+            parent: gameHost,
+            width: gameHost.clientWidth || 900,
+            height: 460,
+            backgroundColor: "#181109",
+            scene: [sceneRef],
+            scale: {{
+              mode: window.Phaser.Scale.RESIZE,
+              autoCenter: window.Phaser.Scale.CENTER_BOTH,
+            }},
+          }});
         }}
 
         function connect() {{
@@ -1032,14 +1113,6 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           }});
         }}
 
-        function currentMove() {{
-          let dx = 0;
-          if (keyState["ArrowLeft"] || keyState["a"] || keyState["A"]) dx -= 1;
-          if (keyState["ArrowRight"] || keyState["d"] || keyState["D"]) dx += 1;
-          const jump = !!(keyState["ArrowUp"] || keyState["w"] || keyState["W"] || keyState[" "]);
-          return {{ dx, dy: 0, jump }};
-        }}
-
         function startMovementLoop() {{
           if (moveTimer) clearInterval(moveTimer);
           moveTimer = setInterval(() => {{
@@ -1053,20 +1126,14 @@ def render_coop_puzzle_hub(user_label: str) -> None:
         joinButton.addEventListener("click", connect);
         resetButton.addEventListener("click", () => send("reset_coop"));
         nextButton.addEventListener("click", () => send("next_coop_level"));
-
-        window.addEventListener("keydown", (event) => {{
-          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {{
-            event.preventDefault();
-          }}
-          keyState[event.key] = true;
-        }});
-        window.addEventListener("keyup", (event) => {{
-          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {{
-            event.preventDefault();
-          }}
-          keyState[event.key] = false;
-        }});
-        startMovementLoop();
+        loadScript("https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js")
+          .then(() => {{
+            buildGame();
+            startMovementLoop();
+          }})
+          .catch(() => {{
+            setStatus("Could not load the Phaser client.");
+          }});
         </script>
         """,
         height=700,
