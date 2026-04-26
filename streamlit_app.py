@@ -900,13 +900,12 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           if (!sceneRef) return {{ dx: 0, dy: 0, jump: false }};
           const keys = sceneRef.keys;
           if (!keys) return {{ dx: 0, dy: 0, jump: false }};
-          let dx = 0;
-          if (keys.left.isDown || keys.a.isDown) dx -= 1;
-          if (keys.right.isDown || keys.d.isDown) dx += 1;
+          const left = !!(keys.left.isDown || keys.a.isDown);
+          const right = !!(keys.right.isDown || keys.d.isDown);
           const jumpPressed = keys.up.isDown || keys.w.isDown || keys.space.isDown;
           const jump = jumpPressed && !jumpLock;
           jumpLock = jumpPressed;
-          return {{ dx, dy: 0, jump }};
+          return {{ left, right, jump }};
         }}
 
         function buildGame() {{
@@ -921,6 +920,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               this.exitZone = null;
               this.gate = null;
               this.keys = null;
+              this.decals = [];
             }}
 
             create() {{
@@ -943,13 +943,18 @@ def render_coop_puzzle_hub(user_label: str) -> None:
 
             renderRoom(coop) {{
               const level = coop.level;
-              const levelKey = JSON.stringify({{ index: level.index, gateOpen: coop.gateOpen, pressed: coop.pressedSwitches }});
+              const levelKey = JSON.stringify({{
+                index: level.index,
+                gateOpen: coop.gateOpen,
+                pressed: coop.pressedSwitches,
+              }});
               if (this.levelKey !== levelKey) {{
                 this.levelKey = levelKey;
                 this.children.removeAll();
                 this.platforms = [];
                 this.switches = [];
                 this.players.clear();
+                this.decals = [];
                 this.drawLevel(level, coop);
               }} else {{
                 this.updateDynamicLevel(coop);
@@ -960,47 +965,50 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             drawLevel(level, coop) {{
               const padX = 28;
               const padY = 22;
-              const tileW = (this.scale.width - padX * 2) / level.width;
-              const tileH = (this.scale.height - padY * 2) / level.height;
-              for (let y = 0; y < level.height; y += 1) {{
-                for (let x = 0; x < level.width; x += 1) {{
+              const scaleX = (this.scale.width - padX * 2) / level.worldWidth;
+              const scaleY = (this.scale.height - padY * 2) / level.worldHeight;
+              this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x1a1208, 1);
+              this.add.rectangle(this.scale.width / 2, 86, this.scale.width * 0.7, 130, 0x2c1b0d, 0.2);
+              for (let y = 0; y < 10; y += 1) {{
+                for (let x = 0; x < 18; x += 1) {{
                   const cell = this.add.rectangle(
-                    padX + x * tileW + tileW / 2,
-                    padY + y * tileH + tileH / 2,
-                    tileW - 1,
-                    tileH - 1,
+                    padX + x * ((this.scale.width - padX * 2) / 18) + ((this.scale.width - padX * 2) / 18) / 2,
+                    padY + y * ((this.scale.height - padY * 2) / 10) + ((this.scale.height - padY * 2) / 10) / 2,
+                    ((this.scale.width - padX * 2) / 18) - 1,
+                    ((this.scale.height - padY * 2) / 10) - 1,
                     0xffffff,
-                    0.03
+                    0.015
                   );
-                  cell.setStrokeStyle(1, 0xffffff, 0.04);
+                  cell.setStrokeStyle(1, 0xf9edd1, 0.035);
+                  this.decals.push(cell);
                 }}
               }}
-              (level.solids || []).forEach((rect) => {{
+              (level.platforms || []).forEach((rect) => {{
                 const node = this.add.rectangle(
-                  padX + rect.x * tileW + (rect.w * tileW) / 2,
-                  padY + rect.y * tileH + (rect.h * tileH) / 2,
-                  rect.w * tileW - 4,
-                  rect.h * tileH - 4,
-                  0x6b6257,
-                  0.88
+                  padX + rect.x * scaleX + (rect.w * scaleX) / 2,
+                  padY + rect.y * scaleY + (rect.h * scaleY) / 2,
+                  rect.w * scaleX - 4,
+                  rect.h * scaleY - 4,
+                  0x615448,
+                  0.96
                 );
-                node.setStrokeStyle(1, 0xffffff, 0.08);
+                node.setStrokeStyle(2, 0xcdb78a, 0.16);
                 this.platforms.push(node);
               }});
               this.exitZone = this.add.rectangle(
-                padX + level.exit.x * tileW + (level.exit.w * tileW) / 2,
-                padY + level.exit.y * tileH + (level.exit.h * tileH) / 2,
-                level.exit.w * tileW - 4,
-                level.exit.h * tileH - 4,
-                0x47d27b,
-                0.28
+                padX + level.exit.x * scaleX + (level.exit.w * scaleX) / 2,
+                padY + level.exit.y * scaleY + (level.exit.h * scaleY) / 2,
+                level.exit.w * scaleX - 4,
+                level.exit.h * scaleY - 4,
+                0x4ecb7a,
+                0.22
               );
               this.exitZone.setStrokeStyle(2, 0x72ec97, 0.7);
               this.gate = this.add.rectangle(
-                padX + level.gate.x * tileW + (level.gate.w * tileW) / 2,
-                padY + level.gate.y * tileH + (level.gate.h * tileH) / 2,
-                level.gate.w * tileW - 6,
-                level.gate.h * tileH - 6,
+                padX + level.gate.x * scaleX + (level.gate.w * scaleX) / 2,
+                padY + level.gate.y * scaleY + (level.gate.h * scaleY) / 2,
+                level.gate.w * scaleX - 6,
+                level.gate.h * scaleY - 6,
                 coop.gateOpen ? 0x7fc4ff : 0xbe5c5c,
                 coop.gateOpen ? 0.2 : 0.95
               );
@@ -1009,10 +1017,10 @@ def render_coop_puzzle_hub(user_label: str) -> None:
               (level.switches || []).forEach((switchTile) => {{
                 const active = (coop.pressedSwitches || []).includes(switchTile.id);
                 const node = this.add.rectangle(
-                  padX + switchTile.x * tileW + tileW / 2,
-                  padY + switchTile.y * tileH + tileH * 0.8,
-                  tileW - 24,
-                  14,
+                  padX + switchTile.x * scaleX + (switchTile.w * scaleX) / 2,
+                  padY + switchTile.y * scaleY + (switchTile.h * scaleY) / 2,
+                  switchTile.w * scaleX - 8,
+                  Math.max(12, switchTile.h * scaleY - 6),
                   active ? 0x72ec97 : 0xf7d154,
                   0.98
                 );
@@ -1035,36 +1043,53 @@ def render_coop_puzzle_hub(user_label: str) -> None:
             renderPlayers(level, playersById) {{
               const padX = 28;
               const padY = 22;
-              const tileW = (this.scale.width - padX * 2) / level.width;
-              const tileH = (this.scale.height - padY * 2) / level.height;
+              const scaleX = (this.scale.width - padX * 2) / level.worldWidth;
+              const scaleY = (this.scale.height - padY * 2) / level.worldHeight;
               const alive = new Set(Object.keys(playersById || {{}}));
               Object.values(playersById || {{}}).forEach((player) => {{
-                const px = padX + player.x * tileW + tileW / 2;
-                const py = padY + player.y * tileH + tileH / 2;
+                const px = padX + player.x * scaleX + (player.w * scaleX) / 2;
+                const py = padY + player.y * scaleY + (player.h * scaleY) / 2;
                 let sprite = this.players.get(player.id);
                 if (!sprite) {{
-                  const body = this.add.rectangle(px, py, tileW - 14, tileH - 14, parseInt(player.color.replace("#", ""), 16), 1);
-                  body.setStrokeStyle(2, 0x111111, 0.4);
-                  const label = this.add.text(px, py, playerInitials(player.name), {{
+                  const container = this.add.container(px, py);
+                  const legL = this.add.rectangle(-11, 23, 10, 26, 0x201d19, 1);
+                  const legR = this.add.rectangle(11, 23, 10, 26, 0x201d19, 1);
+                  const body = this.add.rectangle(0, 8, 38, 44, parseInt(player.color.replace("#", ""), 16), 1);
+                  body.setStrokeStyle(2, 0x111111, 0.28);
+                  const armL = this.add.rectangle(-25, 8, 10, 26, 0x201d19, 1);
+                  const armR = this.add.rectangle(25, 8, 10, 26, 0x201d19, 1);
+                  const head = this.add.circle(0, -29, 18, 0xf6e7c8, 1);
+                  const eyeL = this.add.circle(-6, -31, 2.2, 0x111111, 1);
+                  const eyeR = this.add.circle(6, -31, 2.2, 0x111111, 1);
+                  const label = this.add.text(0, 8, playerInitials(player.name), {{
                     fontFamily: "Inter, system-ui, sans-serif",
                     fontSize: "14px",
                     color: "#111111",
+                    fontStyle: "bold",
                   }}).setOrigin(0.5);
-                  sprite = {{ body, label }};
+                  container.add([legL, legR, armL, armR, body, head, eyeL, eyeR, label]);
+                  sprite = {{ container, legL, legR, armL, armR }};
                   this.players.set(player.id, sprite);
                 }}
                 this.tweens.add({{
-                  targets: [sprite.body, sprite.label],
+                  targets: sprite.container,
                   x: px,
                   y: py,
-                  duration: 90,
-                  ease: "Quad.out",
+                  duration: 60,
+                  ease: "Sine.out",
                 }});
+                const moving = Math.abs(player.vx || 0) > 0.18;
+                const swing = moving ? Math.sin(performance.now() / 120) * 0.55 : 0.08;
+                sprite.legL.rotation = swing;
+                sprite.legR.rotation = -swing;
+                sprite.armL.rotation = -swing * 0.8;
+                sprite.armR.rotation = swing * 0.8;
+                sprite.container.scaleX = player.facing === -1 ? -1 : 1;
+                sprite.container.scaleY = player.grounded ? 1 : 0.97;
               }});
               for (const [playerId, sprite] of this.players.entries()) {{
                 if (!alive.has(playerId)) {{
-                  sprite.body.destroy();
-                  sprite.label.destroy();
+                  sprite.container.destroy();
                   this.players.delete(playerId);
                 }}
               }}
@@ -1117,9 +1142,7 @@ def render_coop_puzzle_hub(user_label: str) -> None:
           if (moveTimer) clearInterval(moveTimer);
           moveTimer = setInterval(() => {{
             const move = currentMove();
-            if (move.dx !== 0 || move.jump) {{
-              send("move_coop", move);
-            }}
+            send("set_coop_input", {{ input: move }});
           }}, 110);
         }}
 
